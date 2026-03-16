@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+template_path="$REPO_DIR/templates/AGENTS.autoresearch.md"
+
+die() {
+  echo "codex-autoresearch: $*" >&2
+  exit 1
+}
+
+usage() {
+  cat <<'MSG'
+Usage:
+  codex-autoresearch install-agents
+  codex-autoresearch off
+  codex-autoresearch [resume] [PROMPT...]
+  codex-autoresearch exec [PROMPT...]
+
+Notes:
+  - Runs inside a git repository (uses repo root for session files).
+  - Launches Codex with an explicit $autoresearch skill mention.
+MSG
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
+repo_root() {
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git rev-parse --show-toplevel
+  else
+    return 1
+  fi
+}
+
+require_repo() {
+  repo_root >/dev/null 2>&1 || die "run this inside a git repository"
+}
+
+install_agents() {
+  require_repo
+  local root agents_md block
+  root="$(repo_root)"
+  agents_md="$root/AGENTS.md"
+
+  [ -f "$template_path" ] || die "missing template: $template_path"
+  block="$(cat "$template_path")"
+
+  if [ -f "$agents_md" ] && grep -q "<!-- autoresearch-codex:start -->" "$agents_md"; then
+    echo "AGENTS.md already contains the autoresearch-codex block: $agents_md"
+    return 0
+  fi
+
+  if [ -f "$agents_md" ]; then
+    printf "\n\n%s\n" "$block" >>"$agents_md"
+  else
+    printf "%s\n" "$block" >"$agents_md"
+  fi
+
+  echo "Installed autoresearch-codex block into: $agents_md"
+}
+
+pause_loop() {
+  require_repo
+  local root
+  root="$(repo_root)"
+  touch "$root/.autoresearch-off"
+  echo "Paused autoresearch (created): $root/.autoresearch-off"
+}
+
+run_interactive() {
+  require_repo
+  require_cmd codex
+  local root prompt
+  root="$(repo_root)"
+  cd "$root"
+
+  prompt="$*"
+  if [ -z "$prompt" ]; then
+    if [ -f "$root/autoresearch.md" ]; then
+      prompt='$autoresearch resume the existing autoresearch session in this repository.'
+    else
+      prompt='$autoresearch set up a new autoresearch session in this repository.'
+    fi
+  else
+    prompt="\$autoresearch $prompt"
+  fi
+
+  codex "$prompt"
+}
+
+run_exec() {
+  require_repo
+  require_cmd codex
+  local root prompt
+  root="$(repo_root)"
+
+  prompt="$*"
+  if [ -z "$prompt" ]; then
+    if [ -f "$root/autoresearch.md" ]; then
+      prompt='$autoresearch resume the existing autoresearch session in this repository.'
+    else
+      prompt='$autoresearch set up a new autoresearch session in this repository.'
+    fi
+  else
+    prompt="\$autoresearch $prompt"
+  fi
+
+  codex exec --full-auto --sandbox workspace-write -C "$root" "$prompt"
+}
+
+main() {
+  case "${1:-}" in
+    -h|--help|help)
+      usage
+      ;;
+    install-agents)
+      shift
+      [ "${1:-}" = "" ] || die "install-agents takes no arguments"
+      install_agents
+      ;;
+    off)
+      shift
+      [ "${1:-}" = "" ] || die "off takes no arguments"
+      pause_loop
+      ;;
+    exec)
+      shift
+      run_exec "$@"
+      ;;
+    resume)
+      shift
+      run_interactive "$@"
+      ;;
+    *)
+      run_interactive "$@"
+      ;;
+  esac
+}
+
+main "$@"

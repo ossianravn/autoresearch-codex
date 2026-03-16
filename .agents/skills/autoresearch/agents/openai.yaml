@@ -1,0 +1,4 @@
+interface:
+  display_name: "Autoresearch"
+  short_description: "Autonomous experiment loop for optimization tasks"
+  default_prompt: "Set up or resume an autonomous experiment loop in the current repository."
