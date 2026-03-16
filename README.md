@@ -4,27 +4,11 @@
 [![Codex](https://img.shields.io/badge/Codex-Skill-blueviolet)](https://developers.openai.com/codex/skills/)
 [![Agent Skills](https://img.shields.io/badge/Agent%20Skills-Compatible-4f46e5)](https://agentskills.io/home)
 
-Autonomous experiment loop for Codex.
+AutoResearch is an **autonomous experiment loop**: propose a change, run a benchmark, log the result, keep winners, discard losers, and repeat until you stop.
 
-This is a Codex-native port of [`autoresearch-claude-code`](https://github.com/drivelineresearch/autoresearch-claude-code), which itself is a skill-based port of [`pi-autoresearch`](https://github.com/davebcn87/pi-autoresearch).
+This repo packages AutoResearch as a **Codex skill** (plus a small wrapper CLI) so you can run long-lived optimization loops inside any git repository.
 
-The goal is the same: run repeated experiments, measure the result, keep winners, discard losers, and continue until interrupted.
-
-## Why this port looks different from the Claude Code version
-
-Codex has a different extension model than Claude Code, so this port adapts the architecture instead of doing a direct rename.
-
-| Concern | Claude Code port | Codex port |
-|---|---|---|
-| Main entrypoint | Custom `/autoresearch` command | `$autoresearch` skill mention and `codex-autoresearch` wrapper |
-| Persistent repo instructions | `UserPromptSubmit` hook | `AGENTS.md` block at the target repo root |
-| Skill location | `~/.claude/skills` | `.agents/skills` in-repo or `$HOME/.agents/skills` for user install |
-| Long unattended runs | Same interactive session | Same interactive flow, plus optional `codex exec --full-auto --sandbox workspace-write` wrapper mode |
-| Skill metadata | Claude skill only | Agent Skills layout + optional `agents/openai.yaml` |
-
-The result is still “autoresearch as a skill”, but with Codex-native entrypoints and persistence.
-
-## What is included
+## What you get
 
 ```text
 .agents/skills/autoresearch/SKILL.md      # Codex skill
@@ -47,14 +31,14 @@ If you see `Permission denied`, run `chmod +x install.sh` (or use `bash install.
 
 Then make sure `~/.local/bin` is on your `PATH`.
 
-## Recommended setup inside a target repository
+## One-time setup in a target repository
 
 ```bash
 cd /path/to/project
 codex-autoresearch install-agents
 ```
 
-That appends a repo-root `AGENTS.md` block that tells Codex how to resume an active autoresearch session when `autoresearch.md` exists and `.autoresearch-off` does not.
+That appends a repo-root `AGENTS.md` block that tells Codex how to resume an active AutoResearch session when `autoresearch.md` exists and `.autoresearch-off` does not.
 
 If the repository does not already have an `AGENTS.md`, you can also start from Codex’s built-in scaffold:
 
@@ -113,7 +97,25 @@ You can also start Codex yourself and invoke the skill explicitly:
 $autoresearch optimize bundle size without changing public behavior
 ```
 
-## Session files written inside the target repository
+## How it works (session model)
+
+AutoResearch persists state **in the target repository** so a long loop can be resumed safely after interruptions and even after chat compaction.
+
+At a high level, a loop looks like this:
+
+1. Define an objective, a benchmark command, and a primary metric (plus optional secondary metrics).
+2. Write (or refine) a fast `autoresearch.sh` runner that prints `METRIC name=number` lines.
+3. Iterate: change → benchmark → decide keep/discard → log → dashboard → next idea.
+
+The protocol is intentionally simple: **keep** when the primary metric improves (and checks pass, if you use a correctness gate); otherwise **discard** and try a different idea.
+
+Example metric output:
+
+```text
+METRIC wall_time_seconds=12.345
+```
+
+### Session files written inside the target repository
 
 The wrapper resolves the repository root with `git rev-parse --show-toplevel` when available, so the session files are intended to live at the repo root even if you launch from a nested directory.
 
@@ -128,7 +130,11 @@ The wrapper resolves the repository root with `git rev-parse --show-toplevel` wh
 | `autoresearch.ideas.md` | Backlog for larger or postponed ideas |
 | `.autoresearch-off` | Pause sentinel |
 
-## Codex-native workflow notes
+### Optional correctness gate
+
+If you need “faster but still correct”, add an `autoresearch.checks.sh` script. The skill will run it after successful benchmarks and will log failures as `checks_failed` (not `keep`).
+
+## Codex workflow notes
 
 - Use the `autoresearch` skill as the protocol source of truth.
 - Use `AGENTS.md` for persistent repository-local autoresearch behavior.
@@ -136,19 +142,19 @@ The wrapper resolves the repository root with `git rev-parse --show-toplevel` wh
 - Use `/plan` if you want Codex to propose a plan before a risky experiment.
 - Use `/compact` only after the current experiment has been fully logged.
 - Use `/status` or `/diff` to inspect the session state or working tree at any time.
-- For chained non-interactive workflows, Codex itself supports `codex exec resume --last ...`.
-
-## Optional correctness gate
-
-Unlike the Claude port, this Codex version restores one useful pattern from `pi-autoresearch`: an optional `autoresearch.checks.sh` file.
-
-Create it when the optimization target must preserve behavior and the loop should reject “faster but broken” experiments. The skill logs these as `checks_failed` instead of `keep`.
+- If you want to continue the most recent interactive session, Codex supports `codex resume --last`.
 
 ## Notes on gitignore and tracked session files
 
 The skill appends an autoresearch block to `.gitignore`, including `autoresearch.md`, `autoresearch.sh`, and `autoresearch.checks.sh`.
 
 That is intentional. These files should be force-added on the first session commit so they survive resets, while still staying out of normal untracked-file noise for later sessions.
+
+## Origins (and why this repo exists)
+
+This is a Codex-native port of [`autoresearch-claude-code`](https://github.com/drivelineresearch/autoresearch-claude-code), which itself is a skill-based port of [`pi-autoresearch`](https://github.com/davebcn87/pi-autoresearch).
+
+Codex and Claude Code have different extension models, so this repo focuses on the **same AutoResearch loop** with Codex-native entrypoints and persistence (`$autoresearch` + repo-local `AGENTS.md` guidance + optional `codex-autoresearch` wrapper).
 
 ## Uninstall
 
